@@ -1,0 +1,308 @@
+# ===================================================================
+# == Declarative App Stack for dossware.com (Traefik Version)
+# == This is the GitOps file. It defines all user-facing applications
+# == and the configuration for Argo CD itself.
+# ==
+# == To use:
+# == 1. Run the bootstrap.sh script first.
+# == 2. Place this file in a Git repository.
+# == 3. Create one final "root" app in Argo CD UI that points to this file.
+# ===================================================================
+
+# =================================================
+# == 1. Argo CD Configuration Application
+# == This app manages Argo CD's own settings, like its Ingress.
+# =================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-config
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://argoproj.github.io/argo-helm
+    chart: argo-cd
+    targetRevision: 8.1.2
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+  ignoreDifferences:
+  - group: argoproj.io
+    kind: Application
+    jsonPointers:
+    - /spec/source
+  helm:
+    values: |
+      configs:
+        params:
+          "server.insecure": "true"
+        cm:
+          url: https://argocd.dossware.com
+
+---
+
+# =================================================
+# == 2.1 Prometheus CRDs Application (Critical: Ensures CRDs are installed first)
+# ==    This application only manages the CRDs required by Prometheus Operator.
+# ==    It must be Synced successfully BEFORE the 'prometheus-stack' application.
+# =================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prometheus-crds # NEW: Separate app for CRDs
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 58.1.0
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring # CRDs are cluster-scoped but Helm needs a namespace
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # ApplyOutOfSyncOnly is useful here as CRDs don't change often
+      # - ApplyOutOfSyncOnly=true
+  helm:
+    values: |
+      # Disable all components except for what's needed to install CRDs
+      alertmanager:
+        enabled: false
+      grafana:
+        enabled: false
+      kubeEtcd:
+        enabled: false
+      kubeProxy:
+        enabled: false
+      kubeScheduler:
+        enabled: false
+      kubeControllerManager:
+        enabled: false
+      kube-state-metrics:
+        enabled: false
+      nodeExporter:
+        enabled: false
+      prometheus:
+        enabled: false
+      prometheusOperator:
+        enabled: true # Ensure Prometheus Operator's CRDs are deployed
+
+---
+
+# =================================================
+# == 2.2 Prometheus + Grafana Application (Optimized for 8GB RAM)
+# ==    Now assumes Prometheus CRDs are installed by 'prometheus-crds' app.
+# =================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prometheus-stack
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 58.1.0
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  ignoreDifferences:
+  - group: "*"
+    kind: "*"
+    jsonPointers:
+    - /metadata/labels
+    - /metadata/annotations
+    - /metadata/creationTimestamp
+  helm:
+    values: |
+      # Prometheus Operator is enabled here to manage custom resources,
+      # but its CRDs are assumed to be installed by the 'prometheus-crds' app.
+      prometheusOperator:
+        enabled: true
+        createCustomResource: true # Ensure custom resources like Prometheus are created by the operator
+        # This chart version does not have a direct 'installCRDs: false' flag under prometheusOperator.
+        # Relying on the separate 'prometheus-crds' app for CRD installation is the most robust approach.
+
+      grafana:
+        ingress:
+          enabled: true
+          ingressClassName: traefik
+          annotations:
+            cert-manager.io/cluster-issuer: "letsencrypt-prod"
+          hosts:
+            - "grafana.dossware.com"
+          tls:
+            - secretName: grafana-dossware-com-tls
+              hosts:
+                - "grafana.dossware.com"
+        grafana.ini:
+          server:
+            root_url: https://grafana.dossware.com
+            serve_from_sub_path: false
+        persistence:
+          enabled: true
+          type: pvc
+          storageClassName: "local-path"
+          accessModes:
+            - ReadWriteOnce
+          size: 2Gi # Optimized: Reduced Grafana persistence size
+        resources:
+          requests:
+            memory: "256Mi"
+          limits:
+            memory: "512Mi"
+
+      prometheus:
+        prometheusSpec:
+          replicas: 1 # Optimized: Single Prometheus replica
+          storageSpec:
+            volumeClaimTemplate:
+              spec:
+                storageClassName: "local-path"
+                accessModes: ["ReadWriteOnce"]
+                resources:
+                  requests:
+                    storage: 10Gi # Optimized: Reduced Prometheus persistence size
+          resources:
+            requests:
+              memory: "1Gi"
+            limits:
+              memory: "1.5Gi"
+
+      alertmanager:
+        enabled: false # Optimized: Disable Alertmanager if not needed
+      kube-state-metrics:
+        resources:
+          requests:
+            memory: "64Mi"
+          limits:
+            memory: "128Mi"
+      nodeExporter:
+        resources:
+          requests:
+            memory: "32Mi"
+          limits:
+            memory: "64Mi"
+
+---
+
+# =================================================
+# == 3. Redis Application (Optimized for 8GB RAM)
+# =================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: redis
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    chart: redis
+    targetRevision: 19.6.1
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: data-services
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  helm:
+    values: |
+      master:
+        resources:
+          requests:
+            memory: "256Mi"
+          limits:
+            memory: "512Mi"
+        persistence:
+          enabled: true
+          storageClass: "local-path"
+          size: 4Gi # Optimized: Reduced persistence size
+      replica:
+        replicaCount: 1 # Optimized: Reduced to 1 replica
+        resources:
+          requests:
+            memory: "128Mi"
+          limits:
+            memory: "256Mi"
+        persistence:
+          enabled: true
+          storageClass: "local-path"
+          size: 2Gi # Optimized: Reduced persistence size
+
+---
+
+# =================================================
+# == 4. RabbitMQ Application (Optimized for 8GB RAM)
+# =================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rabbitmq
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    chart: rabbitmq
+    targetRevision: 15.2.0
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: data-services
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  helm:
+    values: |
+      replicaCount: 1 # Optimized: Single RabbitMQ replica
+      auth:
+        username: "myuser"
+        password: "mypassword"
+        erlangCookie: "mysecretcookie"
+      ingress:
+        enabled: true
+        ingressClassName: traefik
+        hostname: "rabbitmq.dossware.com"
+        annotations:
+          cert-manager.io/cluster-issuer: "letsencrypt-prod"
+        tls: true
+        extraTls:
+          - hosts:
+              - "rabbitmq.dossware.com"
+            secretName: rabbitmq-dossware-com-tls
+      livenessProbe:
+        enabled: false # Optimized: Disabled probes to avoid 401 error
+      readinessProbe:
+        enabled: false # Optimized: Disabled probes to avoid 401 error
+      resources:
+        requests:
+          memory: "512Mi" # Increased Request Memory for better startup chance
+        limits:
+          memory: "1Gi"   # Increased Limit Memory for better startup chance
+      persistence:
+        enabled: true
+        storageClass: "local-path"
+        size: 4Gi # Optimized: Reduced persistence size
