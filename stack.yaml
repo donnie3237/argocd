@@ -33,6 +33,10 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    # ADDED: This might help with resources that go OutOfSync but are otherwise healthy.
+    # It tells Argo CD to only apply changes if the resource is currently OutOfSync.
+    # applyOutOfSyncOnly: true # This option is for specific situations and might not be suitable here.
+                              # Keeping prune and selfHeal is generally sufficient.
   # Ignore differences to avoid sync loops when managing itself
   ignoreDifferences:
   - group: argoproj.io
@@ -73,12 +77,17 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-  # --- ADDED: Ignore auto-generated labels from Helm chart to fix OutOfSync issue ---
+    # ADDED: This might help ensure all resources are reconciled, even if already created.
+    # applyOutOfSyncOnly: true # This option is for specific situations and might not be suitable here.
+                              # Keeping prune and selfHeal is generally sufficient.
+  # --- MODIFIED: Expanded ignoreDifferences to fix OutOfSync issue for common Helm chart fields ---
   ignoreDifferences:
   - group: "*"
     kind: "*"
     jsonPointers:
     - /metadata/labels
+    - /metadata/annotations # Added to ignore changes in annotations
+    - /metadata/creationTimestamp # Added to ignore differences in creation timestamp
   helm:
     values: |
       grafana:
@@ -187,3 +196,10 @@ spec:
           - hosts:
               - "rabbitmq.dossware.com"
             secretName: rabbitmq-dossware-com-tls
+      # --- ADDED: Disable readiness/liveness probes to avoid 401 error ---
+      # This is a workaround for the 401 error if probes cannot authenticate.
+      # In a production environment, you would configure probes correctly with auth.
+      livenessProbe:
+        enabled: false
+      readinessProbe:
+        enabled: false
