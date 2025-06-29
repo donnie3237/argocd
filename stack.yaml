@@ -73,6 +73,12 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+  # --- ADDED: Ignore auto-generated labels from Helm chart to fix OutOfSync issue ---
+  ignoreDifferences:
+  - group: "*"
+    kind: "*"
+    jsonPointers:
+    - /metadata/labels
   helm:
     values: |
       grafana:
