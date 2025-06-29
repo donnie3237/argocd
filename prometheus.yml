@@ -1,0 +1,66 @@
+# =================================================
+# == Prometheus + Grafana Application
+# =================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prometheus-stack
+  namespace: argocd # Argo CD Application definition lives in argocd namespace
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 58.1.0 # Using a specific stable version
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring # Actual Prometheus/Grafana resources will be in 'monitoring' namespace
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  ignoreDifferences:
+  - group: "*"
+    kind: "*"
+    jsonPointers:
+    - /metadata/labels
+    - /metadata/annotations
+    - /metadata/creationTimestamp
+  helm:
+    values: |
+      grafana:
+        ingress:
+          enabled: true
+          ingressClassName: traefik
+          annotations:
+            cert-manager.io/cluster-issuer: "letsencrypt-prod"
+          hosts:
+            - "grafana.dossware.com"
+          tls:
+            - secretName: grafana-dossware-com-tls
+              hosts:
+                - "grafana.dossware.com"
+        grafana.ini:
+          server:
+            root_url: https://grafana.dossware.com
+            serve_from_sub_path: false
+        persistence:
+          enabled: true
+          type: pvc
+          storageClassName: "local-path"
+          accessModes:
+            - ReadWriteOnce
+          size: 5Gi
+
+      prometheus:
+        prometheusSpec:
+          storageSpec:
+            volumeClaimTemplate:
+              spec:
+                storageClassName: "local-path"
+                accessModes: ["ReadWriteOnce"]
+                resources:
+                  requests:
+                    storage: 20Gi

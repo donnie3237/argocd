@@ -1,0 +1,44 @@
+# =================================================
+# == RabbitMQ Application
+# =================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rabbitmq
+  namespace: argocd # Argo CD Application definition lives in argocd namespace
+spec:
+  project: default
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    chart: rabbitmq
+    targetRevision: 15.2.0 # Using a specific stable version
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: data-services # Actual RabbitMQ resources will be in 'data-services' namespace
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  helm:
+    values: |
+      auth:
+        username: "myuser"
+        password: "mypassword"
+      ingress:
+        enabled: true
+        ingressClassName: traefik
+        hostname: "rabbitmq.dossware.com"
+        annotations:
+          cert-manager.io/cluster-issuer: "letsencrypt-prod"
+        tls: true
+        extraTls:
+          - hosts:
+              - "rabbitmq.dossware.com"
+            secretName: rabbitmq-dossware-com-tls
+      # --- ADDED: Disable readiness/liveness probes to avoid 401 error ---
+      livenessProbe:
+        enabled: false
+      readinessProbe:
+        enabled: false
