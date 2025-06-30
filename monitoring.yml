@@ -25,6 +25,46 @@ spec:
             ingressClassName: traefik
             hosts:
               - prometheus.dossware.com
+          # --- BEGIN Recommended Fixes for Prometheus Deployment ---
+          prometheusSpec:
+            # Set a storage class if you have one, e.g., 'standard' or 'gp2' for AWS, 'default' for many clusters
+            # If your cluster doesn't have a default StorageClass, or you want a specific one, specify it here.
+            # Otherwise, it might be stuck waiting for a volume.
+            # storageSpec:
+            #   volumeClaimTemplate:
+            #     spec:
+            #       storageClassName: your-storage-class-name # <-- UNCOMMENT AND REPLACE IF YOU HAVE A SPECIFIC STORAGE CLASS
+            #       accessModes: ["ReadWriteOnce"]
+            #       resources:
+            #         requests:
+            #           storage: 20Gi # Increased default storage for Prometheus
+            
+            # Increase resources for Prometheus to ensure it can start and handle metrics
+            # These are common minimums; adjust based on your cluster's capacity and expected load.
+            resources:
+              requests:
+                cpu: 200m # Request at least 200m CPU
+                memory: 512Mi # Request at least 512Mi memory
+              limits:
+                cpu: 500m # Limit to 500m CPU
+                memory: 1Gi # Limit to 1Gi memory
+
+            # Ensure you have at least one replica for Prometheus
+            replicas: 1
+          # --- END Recommended Fixes ---
+
+        # Optional: Disable Alertmanager if not immediately needed to save resources
+        # alertmanager:
+        #   enabled: false
+
+        # Optional: Disable Kube-State-Metrics if not immediately needed (already running based on your output)
+        # kube-state-metrics:
+        #   enabled: false
+
+        # Optional: Disable Node-Exporter if not immediately needed (already running based on your output)
+        # prometheus-node-exporter:
+        #   enabled: false
+
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
