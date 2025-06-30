@@ -1,35 +1,37 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: monitoring
-  namespace: argocd
+  name: monitoring # Name of your ArgoCD Application
+  namespace: argocd # Namespace where ArgoCD is running
 spec:
-  project: default
+  project: default # The ArgoCD project this application belongs to
   source:
-    repoURL: https://prometheus-community.github.io/helm-charts
-    chart: kube-prometheus-stack
-    targetRevision: 58.1.0
+    repoURL: https://prometheus-community.github.io/helm-charts # Helm chart repository for kube-prometheus-stack
+    chart: kube-prometheus-stack # Name of the Helm chart
+    targetRevision: 58.1.0 # The version of the Helm chart to deploy
     helm:
-      values: |
+      values: | # These are the values passed to the Helm chart
         grafana:
-          enabled: true
-          adminPassword: admin123
+          enabled: true # Ensure Grafana is enabled
+          adminPassword: admin123 # Set a default admin password for Grafana
           ingress:
-            enabled: true
-            ingressClassName: traefik
+            enabled: true # Enable Ingress for Grafana
+            ingressClassName: traefik # Specify your Ingress Controller class
             hosts:
-              - grafana.dossware.com
+              - grafana.dossware.com # Your desired domain for Grafana
         prometheus:
           ingress:
-            enabled: true
+            enabled: true # Enable Ingress for Prometheus (optional, but good for debugging)
             ingressClassName: traefik
             hosts:
-              - prometheus.dossware.com
-          # --- BEGIN Recommended Fixes for Prometheus Deployment ---
+              - prometheus.dossware.com # Your desired domain for Prometheus
+          # --- IMPORTANT FIX: Corrected Indentation for prometheusSpec ---
+          # This block ensures Prometheus gets the necessary resources and storage.
+          # It must be a direct child of 'prometheus:', not 'prometheus.ingress:'
           prometheusSpec:
-            # Set a storage class if you have one, e.g., 'standard' or 'gp2' for AWS, 'default' for many clusters
+            # Uncomment and set a storage class if your cluster requires it (e.g., 'standard', 'gp2')
             # If your cluster doesn't have a default StorageClass, or you want a specific one, specify it here.
-            # Otherwise, it might be stuck waiting for a volume.
+            # Otherwise, Prometheus's PVC might get stuck 'Pending'.
             # storageSpec:
             #   volumeClaimTemplate:
             #     spec:
@@ -37,10 +39,11 @@ spec:
             #       accessModes: ["ReadWriteOnce"]
             #       resources:
             #         requests:
-            #           storage: 20Gi # Increased default storage for Prometheus
-            
-            # Increase resources for Prometheus to ensure it can start and handle metrics
+            #           storage: 20Gi # Increased default storage for Prometheus data
+
+            # Increase resources for Prometheus to ensure it can start and handle metrics.
             # These are common minimums; adjust based on your cluster's capacity and expected load.
+            # Insufficient resources are a very common cause of Prometheus failing to deploy.
             resources:
               requests:
                 cpu: 200m # Request at least 200m CPU
@@ -49,28 +52,25 @@ spec:
                 cpu: 500m # Limit to 500m CPU
                 memory: 1Gi # Limit to 1Gi memory
 
-            # Ensure you have at least one replica for Prometheus
+            # Ensure you have at least one replica for the Prometheus server
             replicas: 1
-          # --- END Recommended Fixes ---
+          # --- End of prometheusSpec configuration ---
 
-        # Optional: Disable Alertmanager if not immediately needed to save resources
+        # Optional: You can disable other components if you want to save resources
+        # or if you are running them separately.
         # alertmanager:
         #   enabled: false
-
-        # Optional: Disable Kube-State-Metrics if not immediately needed (already running based on your output)
         # kube-state-metrics:
         #   enabled: false
-
-        # Optional: Disable Node-Exporter if not immediately needed (already running based on your output)
         # prometheus-node-exporter:
         #   enabled: false
 
   destination:
-    server: https://kubernetes.default.svc
-    namespace: monitoring
+    server: https://kubernetes.default.svc # Your Kubernetes API server URL
+    namespace: monitoring # The namespace where the monitoring stack will be deployed
   syncPolicy:
     automated:
-      selfHeal: true
-      prune: true
+      selfHeal: true # ArgoCD will automatically reconcile differences
+      prune: true # ArgoCD will delete resources that are no longer defined in Git
     syncOptions:
-      - CreateNamespace=true
+      - CreateNamespace=true # ArgoCD will create the 'monitoring' namespace if it doesn't exist
