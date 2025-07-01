@@ -7,6 +7,9 @@ kind: Secret
 metadata:
   name: pgadmin-secret
   namespace: default
+  # <<< ADDED >>> สั่งให้ Argo CD สร้าง Secret นี้ก่อนเป็นอันดับแรก
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
 type: Opaque
 data:
   # แทนที่ด้วยค่า base64 ของคุณ
