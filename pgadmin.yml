@@ -7,14 +7,16 @@ kind: Secret
 metadata:
   name: pgadmin-secret
   namespace: default
-  # <<< ADDED >>> สั่งให้ Argo CD สร้าง Secret นี้ก่อนเป็นอันดับแรก
+  # สั่งให้ Argo CD สร้าง Secret นี้ก่อนเป็นอันดับแรก
   annotations:
     argocd.argoproj.io/sync-wave: "-1"
 type: Opaque
 data:
-  # แทนที่ด้วยค่า base64 ของคุณ
-  pgadmin-default-email: admin@example.com # ค่าตัวอย่าง: admin@example.com
-  pgadmin-default-password: 1234 # ค่าตัวอย่าง: password
+  # <<< CHANGED >>> เปลี่ยนเป็น Username/Password ที่ง่ายขึ้น
+  # Email: admin@dossware.com
+  pgadmin-default-email: YWRtaW5AZG9zc3dhcmUuY29t
+  # Password: admin
+  pgadmin-default-password: YWRtaW4=
 
 ---
 # --- PersistentVolumeClaim (PVC) สำหรับเก็บข้อมูลของ pgAdmin ไม่ให้หาย ---
@@ -23,9 +25,15 @@ kind: PersistentVolumeClaim
 metadata:
   name: pgadmin-pvc
   namespace: default
+  # สั่งให้ Argo CD สร้าง PVC นี้ก่อน Deployment
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
 spec:
   accessModes:
     - ReadWriteOnce # เหมาะสำหรับ Pod เดียว
+  # ระบุ StorageClass โดยตรงเพื่อแก้ปัญหา PVC ค้าง
+  # 'local-path' เป็นค่าเริ่มต้นสำหรับ K3s
+  storageClassName: local-path
   resources:
     requests:
       storage: 1Gi # ขอพื้นที่ 1 GB
@@ -63,6 +71,26 @@ spec:
                   key: pgadmin-default-password
           ports:
             - containerPort: 80
+          # <<< ADDED >>> เพิ่ม Health Checks และ Resource Limits
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
           volumeMounts:
             - name: pgadmin-data
               mountPath: /var/lib/pgadmin
